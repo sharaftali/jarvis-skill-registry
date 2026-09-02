@@ -4,7 +4,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from .config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use a backend that is stable in the local container environment.
+# The default bcrypt backend in this stack can fail during password hashing
+# because of the installed library version, which breaks login/bootstrap flows.
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:

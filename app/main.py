@@ -5,7 +5,7 @@ import logging
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.routes import skills, health
+from app.api.routes import skills, health, auth, organizations
 from app.core.database import get_db
 
 # Configure logging
@@ -51,6 +51,8 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router)
+app.include_router(organizations.router)
 app.include_router(skills.router)
 app.include_router(health.router)
 

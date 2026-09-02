@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # Organizations
-    ORGANIZATIONS: str = "ABC Construction,XYZ Builders"
+    ORGANIZATIONS: str = "default-org,ABC Construction,XYZ Builders"
     
     @property
     def organization_list(self) -> List[str]:
