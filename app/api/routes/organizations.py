@@ -14,7 +14,7 @@ from app.schemas.auth import OrganizationCreate, OrganizationResponse, OrgUserLi
 router = APIRouter(prefix="/api/v1", tags=["organizations"])
 
 
-@router.post("/organizations", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/organizations", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 async def create_organization(
     payload: OrganizationCreate,
     db: AsyncSession = Depends(get_db),
@@ -42,7 +42,7 @@ async def create_organization(
     if current_user.get("sub"):
         admin = await db.execute(select(User).where(User.username == current_user["sub"]))
         admin = admin.scalar_one_or_none()
-        if admin is not None:
+        if admin is not None and admin.organization_id != org_id:
             admin.organization_id = org_id
 
     await db.commit()
@@ -50,7 +50,7 @@ async def create_organization(
     return org
 
 
-@router.post("/organizations/{organization_id}/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/organizations/{organization_id}/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 async def create_org_user(
     organization_id: str,
     payload: UserCreate,
@@ -64,8 +64,7 @@ async def create_org_user(
             detail="Only owners can create organization users",
         )
 
-    is_bootstrap_admin = current_user.get("sub") == "admin"
-    if not is_bootstrap_admin and current_user.get("organization_id") != organization_id:
+    if current_user.get("organization_id") != organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only manage users in your organization",
@@ -98,7 +97,7 @@ async def create_org_user(
     return user
 
 
-@router.get("/organizations/{organization_id}/users", response_model=OrgUserListResponse)
+@router.get("/organizations/{organization_id}/users", response_model=OrgUserListResponse, dependencies=[Depends(get_current_user)])
 async def list_org_users(
     organization_id: str,
     db: AsyncSession = Depends(get_db),
@@ -110,8 +109,7 @@ async def list_org_users(
             detail="Access denied",
         )
 
-    is_bootstrap_admin = current_user.get("sub") == "admin"
-    if not is_bootstrap_admin and current_user.get("organization_id") != organization_id:
+    if current_user.get("organization_id") != organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only read users in your organization",

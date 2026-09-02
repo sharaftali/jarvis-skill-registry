@@ -4,43 +4,81 @@ A privacy-first, local-first, multi-tenant backend for managing organization-sco
 
 ## Features
 
-- **Multi-tenant isolation**: Complete separation between organizations
-- **Immutable versioning**: Skills are versioned immutably - changes create new versions
-- **Audit logging**: All skill creation, versioning, and activation events are logged
-- **Role-based authorization**: Only organization owners can activate skills
-- **Secure tool validation**: Destructive or invalid tools are rejected
-- **PostgreSQL with async support**: Production-ready database setup
-- **Comprehensive test suite**: Automated tests covering all requirements
+- **Multi-tenant isolation**: Organization-scoped access is enforced on every protected route.
+- **Immutable versioning**: Skills are versioned immutably; changes create new versions.
+- **Audit logging**: Skill, version, and activation events are logged with organization, actor, and version metadata.
+- **Role-based authorization**: Only organization owners can activate or disable skills.
+- **Secure tool validation**: Destructive or invalid requested tools are rejected.
+- **PostgreSQL with async support**: PostgreSQL is the default runtime database.
+- **Automated tests**: Regression coverage for auth, isolation, versioning, and audit behavior.
 
 ## Tech Stack
 
-- **FastAPI**: Modern, fast web framework
-- **PostgreSQL**: Production database with async support
-- **SQLAlchemy**: ORM with async capabilities
-- **Alembic**: Database migrations
-- **Pydantic**: Data validation
-- **Pytest**: Testing framework
-- **Docker**: Containerization
+- FastAPI
+- PostgreSQL
+- SQLAlchemy Async ORM
+- Alembic
+- Pydantic
+- Pytest
+- Docker Compose
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- Python 3.11+ (for local development)
+- Python 3.11+
 
 ## Quick Start
 
-### Using Docker Compose
-
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/sharaftali/jarvis-skill-registry.git
 cd jarvis-skill-registry
 
-# Copy environment variables
+# Create local env file from template
 cp .env.example .env
 
 # Start services
 docker-compose up -d
 
-# Run migrations
+# Apply database migrations
 docker-compose exec app alembic upgrade head
+```
+
+## Default bootstrap account
+
+The app creates a default bootstrap owner on startup using the env values in `.env`:
+
+- Username: `DEFAULT_ADMIN_USERNAME`
+- Email: `DEFAULT_ADMIN_EMAIL`
+- Password: `DEFAULT_ADMIN_PASSWORD`
+- Organization: `DEFAULT_ORGANIZATION_ID`
+
+This bootstrap credential is used only for initial setup and must not be treated as a cross-tenant admin bypass.
+
+## Example login and protected calls
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@123"}'
+```
+
+```bash
+curl -X GET http://localhost:8000/api/v1/skills \
+  -H 'Authorization: Bearer <token>' \
+  -H 'X-Organization: ABC Construction'
+```
+
+## Testing
+
+```bash
+docker-compose exec -T app pytest tests/test_api/test_auth.py tests/test_api/test_skills.py -q
+```
+
+## Security and isolation notes
+
+- Organization membership is enforced by `organization_id`.
+- Cross-tenant reads and writes are rejected.
+- Only owners can activate or disable skills.
+- Skill versions are immutable; new versions are created rather than mutating active content.
+

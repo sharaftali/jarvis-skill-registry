@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from fastapi.security import HTTPBearer
 from contextlib import asynccontextmanager
 import logging
 
@@ -20,17 +22,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting up...")
-    # try:
-    #     # Create tables (in production, use Alembic migrations)
-    #     async with engine.begin() as conn:
-    #         await conn.run_sync(Base.metadata.create_all)
-    #     logger.info("Database tables verified")
-    # except Exception as e:
-    #     logger.error(f"Database initialization error: {e}")
-    #     raise
+    try:
+        await auth.initialize_default_admin()
+        logger.info("Default bootstrap admin initialized")
+    except Exception as exc:
+        logger.exception("Failed to initialize default bootstrap admin during startup: %s", exc)
+        raise
     yield
     logger.info("Shutting down...")
 
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 # Create FastAPI app
 app = FastAPI(
@@ -40,6 +42,30 @@ app = FastAPI(
     lifespan=lifespan,
     redirect_slashes=False,
 )
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # Configure CORS
 app.add_middleware(

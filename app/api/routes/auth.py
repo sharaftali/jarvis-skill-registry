@@ -1,9 +1,12 @@
+import asyncio
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.security import create_access_token, verify_password, get_password_hash
@@ -12,33 +15,64 @@ from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenResponse
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+_startup_bootstrap_lock = asyncio.Lock()
 
 
 async def _ensure_default_admin(db: AsyncSession) -> User:
-    admin = await db.execute(select(User).where(User.username == "admin"))
+    admin = await db.execute(select(User).where(User.username == settings.DEFAULT_ADMIN_USERNAME))
     admin = admin.scalar_one_or_none()
     if admin is not None:
         return admin
 
-    org = await db.execute(select(Organization).where(Organization.id == "default-org"))
+    org = await db.execute(select(Organization).where(Organization.id == settings.DEFAULT_ORGANIZATION_ID))
     org = org.scalar_one_or_none()
     if org is None:
-        org = Organization(id="default-org", name="Default Organization")
+        org = Organization(
+            id=settings.DEFAULT_ORGANIZATION_ID,
+            name=settings.DEFAULT_ORGANIZATION_NAME,
+        )
         db.add(org)
         await db.flush()
 
     admin = User(
-        organization_id="default-org",
-        username="admin",
-        email="admin@local.dev",
-        password_hash=get_password_hash("Admin@123"),
+        organization_id=settings.DEFAULT_ORGANIZATION_ID,
+        username=settings.DEFAULT_ADMIN_USERNAME,
+        email=settings.DEFAULT_ADMIN_EMAIL,
+        password_hash=get_password_hash(settings.DEFAULT_ADMIN_PASSWORD),
         role="owner",
         is_active=True,
     )
     db.add(admin)
-    await db.commit()
+    await db.flush()
     await db.refresh(admin)
     return admin
+
+
+async def initialize_default_admin() -> None:
+    """Startup-only bootstrap for the default admin user and default-org tenant."""
+    async with _startup_bootstrap_lock:
+        bootstrap_engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=settings.DEBUG,
+            poolclass=NullPool,
+        )
+        async_session_factory = async_sessionmaker(
+            bootstrap_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        try:
+            async with async_session_factory() as db:
+                try:
+                    await _ensure_default_admin(db)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+        finally:
+            await bootstrap_engine.dispose()
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -49,6 +83,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     if user is None:
         user = await _ensure_default_admin(db)
+        await db.commit()
 
     if not user or not user.is_active:
         raise HTTPException(
@@ -57,9 +92,13 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         )
 
     if not verify_password(payload.password, user.password_hash):
-        if payload.username == "admin" and payload.password == "Admin@123":
+        if (
+            payload.username == settings.DEFAULT_ADMIN_USERNAME
+            and payload.password == settings.DEFAULT_ADMIN_PASSWORD
+        ):
             # Ensure the default bootstrap credential works even before first explicit bootstrap.
             user = await _ensure_default_admin(db)
+            await db.commit()
             if user and user.is_active and verify_password(payload.password, user.password_hash):
                 pass
             else:
@@ -95,7 +134,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("/me")
+@router.get("/me", dependencies=[Depends(get_current_user)])
 async def get_current_user_profile(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -106,12 +145,3 @@ async def get_current_user_profile(
     }
 
 
-@router.post("/bootstrap")
-async def bootstrap_default_admin(db: AsyncSession = Depends(get_db)):
-    """Create a default super-admin and default organizations if they do not exist."""
-    admin = await _ensure_default_admin(db)
-    return {
-        "username": admin.username,
-        "password": "Admin@123",
-        "organization_id": admin.organization_id,
-    }

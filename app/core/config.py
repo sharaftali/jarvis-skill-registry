@@ -7,20 +7,27 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     # Database
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
-    
+
     # Security
     SECRET_KEY: str = Field(..., min_length=32)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
+
     # Application
     APP_NAME: str = "Jarvis Skill Registry"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    
+
     # Organizations
     ORGANIZATIONS: str = "default-org,ABC Construction,XYZ Builders"
-    
+    DEFAULT_ORGANIZATION_ID: str = "default-org"
+    DEFAULT_ORGANIZATION_NAME: str = "Default Organization"
+
+    # Default bootstrap admin
+    DEFAULT_ADMIN_USERNAME: str = "admin"
+    DEFAULT_ADMIN_EMAIL: str = "admin@local.dev"
+    DEFAULT_ADMIN_PASSWORD: str = "Admin@123"
+
     @property
     def organization_list(self) -> List[str]:
         return [org.strip() for org in self.ORGANIZATIONS.split(",") if org.strip()]

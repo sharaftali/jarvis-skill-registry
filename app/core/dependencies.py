@@ -1,32 +1,39 @@
 from typing import Optional, Dict, Any
 from fastapi import Depends, HTTPException, status, Header
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from .security import decode_token
 from .config import settings
+from app.core.database import get_db
+from app.models.organization import Organization
+
+security_scheme = HTTPBearer(auto_error=False)
+
+
+async def _organization_is_valid(db: AsyncSession, organization_id: Optional[str]) -> bool:
+    if not organization_id:
+        return False
+    if organization_id in settings.organization_list:
+        return True
+    result = await db.execute(select(Organization).where(Organization.id == organization_id))
+    return result.scalar_one_or_none() is not None
 
 
 async def get_current_user(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
+    authorization: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     x_organization: Optional[str] = Header(None, alias="X-Organization"),
+    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Authenticate the current user.
 
-    For local evaluation and tests, a valid X-Organization header without a JWT
-    is treated as an authenticated owner request for that organization. When a JWT
-    is provided, it remains the source of truth and the same tenant validation
-    rules still apply.
+    A valid JWT remains the primary source of truth. For local evaluation and tests,
+    a valid X-Organization header without a JWT is accepted as a scoped owner session
+    only for a configured organization, never as a blanket admin override.
     """
-    if authorization:
-        # Require Bearer scheme
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication scheme. Expected 'Bearer <token>'",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # Extract token
-        token = authorization.replace("Bearer ", "").strip()
+    if authorization is not None:
+        token = authorization.credentials
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -34,7 +41,6 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Decode and validate JWT
         payload = decode_token(token)
         if not payload:
             raise HTTPException(
@@ -43,7 +49,6 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Validate required claims
         required_claims = ["sub", "organization_id", "role"]
         missing_claims = [claim for claim in required_claims if claim not in payload]
 
@@ -54,15 +59,13 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Validate organization_id is one of the configured organizations
-        if payload["organization_id"] not in settings.organization_list:
+        if not await _organization_is_valid(db, payload["organization_id"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid organization in token: {payload['organization_id']}",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Validate role is valid
         if payload["role"] not in ["owner", "member", "viewer"]:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -72,7 +75,7 @@ async def get_current_user(
 
         return payload
 
-    if x_organization and x_organization in settings.organization_list:
+    if x_organization and await _organization_is_valid(db, x_organization):
         return {
             "sub": "test-owner",
             "organization_id": x_organization,

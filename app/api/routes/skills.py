@@ -14,7 +14,7 @@ from app.services.audit_service import AuditService
 router = APIRouter(prefix="/api/v1/skills", tags=["skills"])
 
 
-@router.post("", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SkillResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 async def create_skill(
     skill_data: SkillCreate,
     db: AsyncSession = Depends(get_db),
@@ -44,7 +44,7 @@ async def create_skill(
     return skill
 
 
-@router.get("", response_model=SkillListResponse)
+@router.get("", response_model=SkillListResponse, dependencies=[Depends(get_current_user)])
 async def list_skills(
     status: Optional[str] = Query(None, pattern="^(draft|active|disabled)$"),
     limit: int = Query(100, ge=1, le=200),

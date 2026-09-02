@@ -42,6 +42,12 @@ class TestAuthAPI:
         )
         org_id = org_response.json()["id"]
 
+        relogin = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "Admin@123"},
+        )
+        token = relogin.json()["access_token"]
+
         response = client.post(
             f"/api/v1/organizations/{org_id}/users",
             json={
@@ -56,3 +62,24 @@ class TestAuthAPI:
         data = response.json()
         assert data["username"] == "analyst1"
         assert data["role"] == "member"
+
+    def test_default_admin_cannot_manage_foreign_org(self, client):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "Admin@123"},
+        )
+        token = login.json()["access_token"]
+
+        response = client.post(
+            "/api/v1/organizations/abc-construction/users",
+            json={
+                "username": "foreign-user",
+                "email": "foreign@abc.local",
+                "password": "StrongPass123!",
+                "role": "member",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert "organization" in response.json()["detail"].lower()
