@@ -64,7 +64,8 @@ async def create_org_user(
             detail="Only owners can create organization users",
         )
 
-    if current_user.get("organization_id") != organization_id:
+    auth_org_id = current_user.get("organization_id")
+    if auth_org_id != organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only manage users in your organization",
@@ -109,12 +110,13 @@ async def list_org_users(
             detail="Access denied",
         )
 
-    if current_user.get("organization_id") != organization_id:
+    auth_org_id = current_user.get("organization_id")
+    if auth_org_id != organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only read users in your organization",
         )
 
-    result = await db.execute(select(User).where(User.organization_id == organization_id))
+    result = await db.execute(select(User).where(User.organization_id == auth_org_id))
     users = result.scalars().all()
     return {"users": users, "total": len(users)}

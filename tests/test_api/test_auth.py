@@ -83,3 +83,21 @@ class TestAuthAPI:
 
         assert response.status_code == 403
         assert "organization" in response.json()["detail"].lower()
+
+    def test_login_rejects_wrong_password(self, client):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "WrongPassword!"},
+        )
+
+        assert response.status_code == 401
+        assert "invalid username or password" in response.json()["detail"].lower()
+
+    def test_x_organization_header_is_not_a_valid_authentication_mechanism(self, client):
+        response = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Organization": "default-org"},
+        )
+
+        assert response.status_code == 401
+        assert "authorization" in response.json()["detail"].lower()

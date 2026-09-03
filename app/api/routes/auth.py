@@ -81,36 +81,21 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await db.execute(select(User).where(User.username == payload.username))
     user = user.scalar_one_or_none()
 
-    if user is None:
+    if user is None and payload.username == settings.DEFAULT_ADMIN_USERNAME:
         user = await _ensure_default_admin(db)
         await db.commit()
 
-    if not user or not user.is_active:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
 
     if not verify_password(payload.password, user.password_hash):
-        if (
-            payload.username == settings.DEFAULT_ADMIN_USERNAME
-            and payload.password == settings.DEFAULT_ADMIN_PASSWORD
-        ):
-            # Ensure the default bootstrap credential works even before first explicit bootstrap.
-            user = await _ensure_default_admin(db)
-            await db.commit()
-            if user and user.is_active and verify_password(payload.password, user.password_hash):
-                pass
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid username or password",
-                )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
 
     token = create_access_token(
         {

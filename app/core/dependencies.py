@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,99 +22,63 @@ async def _organization_is_valid(db: AsyncSession, organization_id: Optional[str
 
 async def get_current_user(
     authorization: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
-    x_organization: Optional[str] = Header(None, alias="X-Organization"),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    """
-    Authenticate the current user.
+    """Authenticate the current user using a bearer JWT only."""
+    if authorization is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    A valid JWT remains the primary source of truth. For local evaluation and tests,
-    a valid X-Organization header without a JWT is accepted as a scoped owner session
-    only for a configured organization, never as a blanket admin override.
-    """
-    if authorization is not None:
-        token = authorization.credentials
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token is empty",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    token = authorization.credentials
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is empty",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or malformed token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or malformed token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        required_claims = ["sub", "organization_id", "role"]
-        missing_claims = [claim for claim in required_claims if claim not in payload]
+    required_claims = ["sub", "organization_id", "role"]
+    missing_claims = [claim for claim in required_claims if claim not in payload]
+    if missing_claims:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Missing required claims: {', '.join(missing_claims)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        if missing_claims:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Missing required claims: {', '.join(missing_claims)}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    if not await _organization_is_valid(db, payload["organization_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid organization in token: {payload['organization_id']}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        if not await _organization_is_valid(db, payload["organization_id"]):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid organization in token: {payload['organization_id']}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    if payload["role"] not in ["owner", "member", "viewer"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid role in token: {payload['role']}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-        if payload["role"] not in ["owner", "member", "viewer"]:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid role in token: {payload['role']}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        return payload
-
-    if x_organization and await _organization_is_valid(db, x_organization):
-        return {
-            "sub": "test-owner",
-            "organization_id": x_organization,
-            "role": "owner",
-        }
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authorization header required or X-Organization header must be valid",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    return payload
 
 
 async def get_current_organization(
     current_user: Dict[str, Any] = Depends(get_current_user),
-    x_organization: Optional[str] = Header(None, alias="X-Organization"),
 ) -> str:
-    """
-    Get the authenticated user's organization from the JWT.
-    
-    If X-Organization header is provided, it is validated against the JWT
-    to ensure they match. The JWT is always the source of truth.
-    
-    Returns the organization_id from the authenticated JWT.
-    
-    Raises 403 if X-Organization is provided and doesn't match the JWT.
-    """
-    # Source of truth is always the JWT
-    authenticated_org = current_user["organization_id"]
-    
-    # If X-Organization is provided, verify it matches the JWT
-    if x_organization is not None:
-        if x_organization != authenticated_org:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Organization mismatch: X-Organization does not match authenticated organization",
-            )
-    
-    return authenticated_org
+    """Return the authenticated user's organization. Never trust a request header or path for tenant scope."""
+    return current_user["organization_id"]
 
 
 async def get_owner_dependency(
