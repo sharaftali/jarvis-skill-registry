@@ -64,12 +64,7 @@ async def create_org_user(
             detail="Only owners can create organization users",
         )
 
-    auth_org_id = current_user.get("organization_id")
-    if auth_org_id != organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only manage users in your organization",
-        )
+
 
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none() is not None:

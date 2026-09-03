@@ -8,7 +8,11 @@ from .config import settings
 from app.core.database import get_db
 from app.models.organization import Organization
 
-security_scheme = HTTPBearer(auto_error=False)
+security_scheme = HTTPBearer(
+    scheme_name="bearerAuth",
+    bearerFormat="JWT",
+    auto_error=False,
+)
 
 
 async def _organization_is_valid(db: AsyncSession, organization_id: Optional[str]) -> bool:
